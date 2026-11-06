@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FilmCraft">
+<meta name="theme-color" content="#1b1c1f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="favicon.png" type="image/png">
+<title>FilmCraft</title>
+<!-- Unofficial iPad build of FilmCraft 0.17.1 (github.com/storytold/filmcraft, MIT/Apache-2.0). -->
+<meta name="color-scheme" content="dark">
+<style>
+  /* Single dark look on purpose: matches FilmCraft's own editor UI. Full-screen canvas app. */
+  :root { --bg: #1b1c1f; --panel: #26272b; --fg: #e6e6e8; --muted: #a9a9ae; --err: #ff8a7a; --accent: #3b6fe0; color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #loading {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px;
+    align-items: center; justify-content: center; color: var(--muted);
+    font: 14px/1.4 system-ui, sans-serif; pointer-events: none; padding: 0 16px; text-align: center;
+  }
+  #loading img { width: 56px; height: 56px; }
+  #bar { width: min(260px, 70vw); height: 4px; border-radius: 2px; background: var(--panel); overflow: hidden; }
+  #bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #status.err { color: var(--err); white-space: pre-wrap; max-width: 70ch; pointer-events: auto; text-align: left; }
+  #fatal { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(20,20,22,.88); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; z-index: 10; }
+  #fatal.on { display: flex; }
+  #fatal .box { max-width: min(78ch, calc(100vw - 32px)); padding: 20px 24px; background: var(--panel); border-radius: 8px; }
+  #fatal h1 { margin: 0 0 8px; font-size: 17px; color: var(--err); }
+  #fatal pre { max-height: 40vh; overflow: auto; white-space: pre-wrap; font-size: 12px; color: var(--muted); }
+  #fatal button { font: inherit; padding: 6px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  #fatal button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+  /* Touch keys: floating bar that stands in for a keyboard on iPad */
+  #keys { position: absolute; left: 50%; transform: translateX(-50%); z-index: 5;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    display: flex; align-items: center; gap: 4px; padding: 5px;
+    max-width: calc(100vw - 20px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    background: rgba(38,39,43,.94); border: 1px solid #3a3b41; border-radius: 12px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.45); font: 600 12px/1 system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  #keys.top { bottom: auto; top: calc(10px + env(safe-area-inset-top, 0px)); }
+  #keys .row { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  #keys .row::-webkit-scrollbar { display: none; }
+  #keys.min .row { display: none; }
+  #keys button { flex: none; min-width: 46px; height: 44px; padding: 0 8px; border: 0; border-radius: 8px;
+    background: #33343a; color: var(--fg); font: inherit; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  #keys button small { font-weight: 500; font-size: 10px; color: var(--muted); }
+  #keys button.hot { background: #44352f; }
+  #keys button.on, #keys button:active { background: var(--accent); }
+  #keys button.on small, #keys button:active small { color: #fff; }
+  #keys .sep { flex: none; width: 1px; align-self: stretch; margin: 6px 2px; background: #45464c; }
+  #keys .ctl { min-width: 36px; background: transparent; color: var(--muted); }
+  #keys button.add { background: var(--accent); }
+  #keys button.add small { color: #dfe7ff; }
+
+  /* File picker handoff: iPad only opens the picker from a direct tap */
+  #pick { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center;
+    background: rgba(15,15,17,.6); font: 14px/1.4 system-ui, sans-serif; }
+  #pick .box { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 22px 24px;
+    background: var(--panel); border-radius: 12px; max-width: calc(100vw - 32px); text-align: center; }
+  #pick .go { font: 600 16px/1 system-ui, sans-serif; padding: 14px 22px; border: 0; border-radius: 10px;
+    background: var(--accent); color: #fff; cursor: pointer; }
+  #pick .no { font: inherit; padding: 6px 12px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+  #pick .note { color: var(--muted); font-size: 12px; max-width: 34ch; }
+  #keys a.music { flex: none; min-width: 52px; height: 44px; padding: 0 8px; border-radius: 8px; text-decoration: none;
+    background: #2f3d33; color: var(--fg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  #keys a.music small { font-weight: 500; font-size: 10px; color: #b9d6c1; }
+  #toast { position: absolute; left: 50%; transform: translateX(-50%); z-index: 9; top: calc(12px + env(safe-area-inset-top, 0px));
+    max-width: calc(100vw - 32px); padding: 10px 14px; border-radius: 10px; background: var(--panel); color: var(--fg);
+    border: 1px solid #3a3b41; font: 13px/1.35 system-ui, sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+  #media-in { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<canvas id="filmcraft_canvas"></canvas>
+<div id="loading">
+  <img src="favicon.png" alt="">
+  <div id="status">Downloading FilmCraft (about 15 MB)…</div>
+  <div id="bar"><i id="fill"></i></div>
+</div>
+<div id="keys" role="toolbar" aria-label="Touch keys" hidden>
+  <button class="ctl" id="k-min" type="button" tabindex="-1" aria-label="Hide or show keys">⌨︎</button>
+  <div class="row" id="k-row"></div>
+  <button class="ctl" id="k-dock" type="button" tabindex="-1" aria-label="Move bar to top or bottom">⇅</button>
+</div>
+<input id="media-in" type="file" multiple accept="video/*,audio/*,image/*,.mov,.mp4,.m4v,.mkv,.webm,.wav,.mp3,.m4a,.aac" tabindex="-1" aria-hidden="true">
+<div id="toast" role="status" hidden></div>
+<div id="pick" hidden>
+  <div class="box">
+    <div>FilmCraft wants to open your files.</div>
+    <button class="go" id="pick-go" type="button">Choose files</button>
+    <div class="note">Pick from Photos or the Files app. Big 4K clips may be too heavy for Safari; shorter clips work best.</div>
+    <button class="no" id="pick-no" type="button">Cancel</button>
+  </div>
+</div>
+<div id="fatal" role="alertdialog" aria-labelledby="fatal-title">
+  <div class="box">
+    <h1 id="fatal-title">FilmCraft stopped working</h1>
+    <div>Unsaved changes are kept in the browser every few seconds and come back when you reload.</div>
+    <pre id="fatal-msg"></pre>
+    <button id="fatal-reload" type="button">Reload</button>
+  </div>
+</div>
+<script>
+  window.filmcraftLoad = {};
+  let lastPanic = null;
+  const consoleError = console.error.bind(console);
+  console.error = (...a) => { const m = a.map(String).join(" "); if (/panicked at|memory allocation of/.test(m)) lastPanic = m; consoleError(...a); };
+  window.filmcraftFatal = (what) => {
+    if (window.filmcraftLoad.fatal) return;
+    const msg = lastPanic || String(what && (what.stack || what.message) || what);
+    window.filmcraftLoad.fatal = msg;
+    document.getElementById("fatal-msg").textContent = msg.split("\n\nStack:")[0];
+    document.getElementById("fatal").classList.add("on");
+  };
+  document.getElementById("fatal-reload").onclick = () => location.reload();
+  const isFatal = (e) => e instanceof WebAssembly.RuntimeError || /panicked at|unreachable|memory access out of bounds/.test(String(e && e.message || e));
+  addEventListener("error", (ev) => { if (window.filmcraftLoad.readyMs && isFatal(ev.error || ev.message)) window.filmcraftFatal(ev.error || ev.message); });
+  addEventListener("unhandledrejection", (ev) => { if (window.filmcraftLoad.readyMs && isFatal(ev.reason)) window.filmcraftFatal(ev.reason); });
+</script>
+<script>
+  // Touch keys: each button sends the same key press a hardware keyboard would.
+  (() => {
+    const apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform + " " + navigator.userAgent);
+    const CMD = apple ? "meta" : "ctrl";
+    // [label, hint, key, code, modifiers]
+    const KEYS = [
+      ["＋ Media", "add files", null, null, [], "add"],
+      ["♪ Music", "Pixabay", null, null, [], "music"],
+      ["sep"],
+      ["▶︎ ❚❚", "Play", " ", "Space", []],
+      ["◀︎", "Frame", "ArrowLeft", "ArrowLeft", []],
+      ["▶︎", "Frame", "ArrowRight", "ArrowRight", []],
+      ["sep"],
+      ["Split", "at playhead", "k", "KeyK", [CMD]],
+      ["Delete", "clip", "Delete", "Delete", [], "hot"],
+      ["Ripple", "delete", "Delete", "Delete", ["shift"], "hot"],
+      ["sep"],
+      ["Undo", "", "z", "KeyZ", [CMD]],
+      ["Redo", "", "z", "KeyZ", [CMD, "shift"]],
+      ["sep"],
+      ["Select", "tool", "v", "KeyV", []],
+      ["Razor", "tool", "c", "KeyC", []],
+      ["Copy", "", "c", "KeyC", [CMD]],
+      ["Paste", "", "v", "KeyV", [CMD]],
+      ["sep"],
+      ["In", "mark", "i", "KeyI", []],
+      ["Out", "mark", "o", "KeyO", []],
+      ["Zoom +", "timeline", "=", "Equal", []],
+      ["Zoom −", "timeline", "-", "Minus", []],
+      ["sep"],
+      ["Shift", "hold", null, null, [], "shift"],
+    ];
+    const bar = document.getElementById("keys");
+    const row = document.getElementById("k-row");
+    const canvas = document.getElementById("filmcraft_canvas");
+    const mediaIn = document.getElementById("media-in");
+    let shiftLatch = null;
+
+    const toastEl = document.getElementById("toast");
+    let toastTimer = 0;
+    function toast(msg, ms = 4000) {
+      toastEl.textContent = msg; toastEl.hidden = false;
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, ms);
+    }
+
+    // Export / Save: on iPad, hand the file to the Share sheet (Save Video, Save to Files, AirDrop).
+    // Elsewhere, fall back to a normal browser download.
+    async function saveLink(a) {
+      const name = a.download || "filmcraft-export.mp4";
+      try {
+        const blob = await (await fetch(a.href)).blob();
+        const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          toast("Tap Save Video or Save to Files.");
+          await navigator.share({ files: [file] });
+          return;
+        }
+        nativeAClick.call(a);
+      } catch (e) {
+        if (e && e.name === "AbortError") toast("Save cancelled.");
+        else { try { nativeAClick.call(a); } catch (_) { toast("Couldn't save " + name + ". Try exporting again."); } }
+      }
+    }
+    const isDl = (a) => a && a.hasAttribute && a.hasAttribute("download") && /^(blob|data):/.test(a.href);
+    const nativeAClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () { if (isDl(this)) { saveLink(this); return; } return nativeAClick.call(this); };
+    const nativeDispatch = EventTarget.prototype.dispatchEvent;
+    HTMLAnchorElement.prototype.dispatchEvent = function (ev) {
+      if (ev && ev.type === "click" && isDl(this)) { saveLink(this); return false; }
+      return nativeDispatch.call(this, ev);
+    };
+    document.addEventListener("click", (e) => {
+      const a = e.target && e.target.closest ? e.target.closest("a[download]") : null;
+      if (isDl(a)) { e.preventDefault(); saveLink(a); }
+    }, true);
+
+    // Hand picked files to FilmCraft the same way a drag-and-drop would ("Drop files anywhere").
+    function feedFiles(files) {
+      if (!files || !files.length) return;
+      const dt = new DataTransfer();
+      for (const f of files) dt.items.add(f);
+      const x = innerWidth / 2, y = innerHeight / 2;
+      for (const type of ["dragenter", "dragover", "drop"]) {
+        let ev;
+        try { ev = new DragEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, dataTransfer: dt }); }
+        catch (_) { ev = new Event(type, { bubbles: true, cancelable: true }); }
+        if (!ev.dataTransfer) { try { Object.defineProperty(ev, "dataTransfer", { value: dt }); } catch (_) {} }
+        canvas.dispatchEvent(ev);
+      }
+      try { canvas.focus({ preventScroll: true }); } catch (_) {}
+    }
+    mediaIn.addEventListener("change", () => feedFiles(mediaIn.files));
+
+    // FilmCraft's own Import buttons open a file input from inside the app's frame loop.
+    // iPad Safari ignores that because it isn't a direct tap, so catch it and ask for one tap.
+    const pick = document.getElementById("pick");
+    let pending = null;
+    const nativeClick = HTMLInputElement.prototype.click;
+    const touch = (navigator.maxTouchPoints || 0) > 0;
+    HTMLInputElement.prototype.click = function () {
+      if (touch && this.type === "file" && this !== mediaIn) { pending = this; pick.hidden = false; return; }
+      return nativeClick.call(this);
+    };
+    document.getElementById("pick-go").addEventListener("click", () => {
+      pick.hidden = true;
+      const el = pending; pending = null;
+      if (el) nativeClick.call(el);
+    });
+    document.getElementById("pick-no").addEventListener("click", () => { pick.hidden = true; pending = null; });
+
+    function target() {
+      const a = document.activeElement;
+      return a && a !== document.body && !bar.contains(a) ? a : canvas;
+    }
+    function press(key, code, mods) {
+      if (document.activeElement !== canvas && !(document.activeElement && document.activeElement.tagName === "INPUT")) {
+        try { canvas.focus({ preventScroll: true }); } catch (_) {}
+      }
+      const m = new Set(mods);
+      if (shiftLatch) m.add("shift");
+      const init = { key, code, bubbles: true, cancelable: true, composed: true,
+        shiftKey: m.has("shift"), metaKey: m.has("meta"), ctrlKey: m.has("ctrl"), altKey: m.has("alt") };
+      const t = target();
+      t.dispatchEvent(new KeyboardEvent("keydown", init));
+      setTimeout(() => t.dispatchEvent(new KeyboardEvent("keyup", init)), 40);
+      if (shiftLatch) { shiftLatch.classList.remove("on"); shiftLatch = null; }
+    }
+    for (const k of KEYS) {
+      if (k[0] === "sep") { const s = document.createElement("span"); s.className = "sep"; row.append(s); continue; }
+      const [label, hint, key, code, mods, kind] = k;
+      const b = document.createElement("button");
+      b.type = "button"; b.tabIndex = -1;
+      b.innerHTML = "<span></span>" + (hint ? "<small></small>" : "");
+      b.firstChild.textContent = label;
+      if (hint) b.lastChild.textContent = hint;
+      if (kind === "hot") b.classList.add("hot");
+      if (kind === "music") {
+        const a = document.createElement("a");
+        a.className = "music"; a.href = "https://pixabay.com/music/"; a.target = "_blank"; a.rel = "noopener";
+        a.innerHTML = "<span></span><small></small>";
+        a.firstChild.textContent = label; a.lastChild.textContent = hint;
+        a.addEventListener("click", () => toast("Download a track on Pixabay, then come back and tap ＋ Media → Browse → Downloads.", 8000));
+        row.append(a);
+        continue;
+      }
+      if (kind === "add") {
+        // The file picker needs a real tap (click), so this one doesn't fire on pointerdown.
+        b.classList.add("add");
+        b.addEventListener("pointerdown", (e) => e.preventDefault());
+        b.addEventListener("click", () => { mediaIn.value = ""; mediaIn.click(); });
+        row.append(b);
+        continue;
+      }
+      // pointerdown + preventDefault keeps focus on the editor instead of the button
+      b.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        if (kind === "shift") {
+          if (shiftLatch) { b.classList.remove("on"); shiftLatch = null; }
+          else { b.classList.add("on"); shiftLatch = b; }
+          return;
+        }
+        press(key, code, mods);
+      });
+      row.append(b);
+    }
+    const keep = (e) => e.preventDefault();
+    document.getElementById("k-min").addEventListener("pointerdown", (e) => {
+      keep(e); bar.classList.toggle("min");
+      try { localStorage.setItem("fc-keys-min", bar.classList.contains("min") ? "1" : ""); } catch (_) {}
+    });
+    document.getElementById("k-dock").addEventListener("pointerdown", (e) => {
+      keep(e); bar.classList.toggle("top");
+      try { localStorage.setItem("fc-keys-top", bar.classList.contains("top") ? "1" : ""); } catch (_) {}
+    });
+    try {
+      if (localStorage.getItem("fc-keys-min")) bar.classList.add("min");
+      if (localStorage.getItem("fc-keys-top")) bar.classList.add("top");
+    } catch (_) {}
+    window.showTouchKeys = () => { bar.hidden = false; };
+  })();
+</script>
+<script type="module">
+  // FilmCraft 0.17.1 web build (MIT/Apache-2.0, github.com/storytold/filmcraft).
+  // The app binary is stored gzipped (15 MB instead of 48 MB) and unpacked here.
+  const PARTS = ["filmcraft_web_bg.wasm.gz"];
+  const TOTAL = 15124158;
+  const status = document.getElementById("status");
+  const fill = document.getElementById("fill");
+  const params = new URLSearchParams(location.search);
+  const t0 = performance.now();
+  try {
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    if (typeof DecompressionStream !== "function") throw new Error("This browser is too old to unpack FilmCraft. Update iPadOS/Safari (16.4 or newer).");
+    let got = 0;
+    const chunks = [];
+    for (const p of PARTS) {
+      const r = await fetch(p);
+      if (!r.ok) throw new Error("Couldn't download " + p + " (" + r.status + ")");
+      const reader = r.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value); got += value.length;
+        fill.style.width = Math.min(100, got / TOTAL * 100).toFixed(1) + "%";
+      }
+    }
+    status.textContent = "Unpacking…";
+    const gz = new Blob(chunks);
+    const wasm = await new Response(gz.stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+    status.textContent = "Starting FilmCraft…";
+    const { default: init, start } = await import("./filmcraft_web.js");
+    await init({ module_or_path: wasm });
+    window.filmcraftLoad.wasmMs = performance.now() - t0;
+    await start("filmcraft_canvas");
+    window.filmcraftLoad.readyMs = performance.now() - t0;
+    window.showTouchKeys();
+  } catch (e) {
+    const text = String(e && e.stack || e);
+    window.filmcraftLoad.error = String(e);
+    if (!params.has("webgl") && !params.has("cpu") && /wgpu|webgpu|requestDevice|requestAdapter|GPUDevice|surface/i.test(text)) {
+      try { params.set("webgl", ""); location.replace(location.pathname + "?" + params.toString().replace(/=(&|$)/g, "$1") + location.hash); } catch (_) {}
+    }
+    status.className = "err";
+    status.textContent = "FilmCraft failed to start:\n" + text;
+    document.getElementById("bar").hidden = true;
+    throw e;
+  }
+</script>
+
+</body>
+</html>

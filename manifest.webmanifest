@@ -1,0 +1,16 @@
+{
+  "name": "FilmCraft",
+  "short_name": "FilmCraft",
+  "description": "Unofficial iPad build of the open-source FilmCraft video editor.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#1b1c1f",
+  "theme_color": "#1b1c1f",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
